@@ -295,6 +295,33 @@ double tempFcn0[1705041];
 
 double tempJac0[19044441];
 
+// CUDA Timer
+typedef struct {
+	cudaEvent_t start;
+	cudaEvent_t stop;
+	float elapsed;
+} cudaTimer;
+
+void cudaStartTimer(cudaTimer *timer, int device, cudaStream_t stream) {
+	cudaSetDevice(device);
+	cudaEventCreate(&timer[0].start);
+	cudaEventCreate(&timer[0].stop);
+	cudaEventRecord(timer[0].start, stream);
+}
+
+void cudaStopTimer(cudaTimer *timer, int device, cudaStream_t stream) {
+	cudaSetDevice(device);
+	cudaEventRecord(timer[0].stop, stream);
+	cudaEventSynchronize(timer[0].stop);
+	cudaEventElapsedTime(&timer[0].elapsed, timer[0].start, timer[0].stop);
+}
+
+cudaTimer timingconvert;
+cudaTimer timingupdaterconst;
+cudaTimer timingfun;
+cudaTimer timingjac;
+cudaTimer timingludecomp;
+
 void debug_dump_real_i(uint32_t len, double * dptr, int p, uint32_t ni, int stride ) {
         uint32_t i;
 
@@ -386,7 +413,7 @@ void openingWRFChemData() {
 	i = 0;
 	fclose(fptr6);
 
-	printf("Opening WRF-Chem data\n");
+	printf("Opening WRF-Chem data\n\n");
 }
 
 void initializeWRFChemData() {
@@ -480,7 +507,7 @@ void initializeWRFChemData() {
 				DataDevice[device].stream);
 	}
 
-	printf("Initializing WRF-Chem device data\n");
+	printf("Initializing WRF-Chem device data\n\n");
 }
 
 __global__ void dev_convert(
@@ -625,6 +652,8 @@ void convertWRFChemData() {
 	gridDim.x  = 19;
 	blockDim.x = 39;
 
+	cudaStartTimer(&timingconvert, 0, 0);
+
 	for(device = startDevice; device < endDevice; device++) {
 		cudaSetDevice(device);
 		
@@ -644,7 +673,10 @@ void convertWRFChemData() {
 		cudaDeviceSynchronize();
 	}
 
+	cudaStopTimer(&timingconvert, 0, 0);
+
 	printf("Converting WRF-Chem device data\n");
+	printf("Timing = %f ms\n\n", timingconvert.elapsed);
 }
 
 void recoverDeviceMemory() {
@@ -892,6 +924,8 @@ void updatingCoefficientWRFChemData() {
 	gridDim.x = 19;
 	blockDim.x = 39;
 
+	cudaStartTimer(&timingupdaterconst, 0, 0);
+
 	for(device = startDevice; device < endDevice; device++) {
 		cudaSetDevice(device);
 
@@ -906,7 +940,10 @@ void updatingCoefficientWRFChemData() {
 		cudaDeviceSynchronize();
 	}
 
+	cudaStopTimer(&timingupdaterconst, 0, 0);
+
 	printf("Updating and calculating rate coefficients\n");
+	printf("Timing = %f ms\n\n", timingupdaterconst.elapsed);
 }
 
 __host__ double WLAMCH(char C) {
@@ -1357,6 +1394,7 @@ void Fun() {
 	dim3 gridDim, blockDim;
 
 	//timer_start(&metrics.odefun);
+	cudaStartTimer(&timingfun, 0, 0);
 
 	length = (39)*(19)*(39);
 
@@ -1382,6 +1420,7 @@ void Fun() {
 	}
 
 	//timer_stop(&metrics.odefun);
+	cudaStopTimer(&timingfun, 0, 0);
 }
 
 // Compute the function at current time
@@ -2623,6 +2662,8 @@ void Jac() {
 	gridDim.x = length / blockDim.x + (length % blockDim.x > 0);
 	
 	//timer_start(&metrics.odejac);
+	cudaStartTimer(&timingjac, 0, 0);
+
 	for(device = startDevice; device < endDevice; device++) {
 		cudaSetDevice(device);
 
@@ -2638,6 +2679,7 @@ void Jac() {
 		cudaDeviceSynchronize();
 	}
 	//timer_stop(&metrics.odejac);
+	cudaStopTimer(&timingjac, 0, 0);
 }
 
 __global__ void dev_KppPrepare(int dom_dim, int * mask, int * mask2
@@ -2755,6 +2797,7 @@ __host__ int KppDecomp(
 	dim3 gridDim, blockDim;
 
 	//timer_start(&metrics.ludecomp);
+	cudaStartTimer(&timingludecomp, 0, 0);
 
 	if(!init) {
 		length = 39*39*19;
@@ -2798,6 +2841,7 @@ __host__ int KppDecomp(
 	}
 
 	//timer_stop(&metrics.ludecomp);
+	cudaStopTimer(&timingludecomp, 0, 0);
 
 	return max;
 }
@@ -3856,6 +3900,12 @@ int main() {
 	updatingCoefficientWRFChemData();
 
 	INTEGRATE();
+
+	printf("\nTiming ODE Fun = %f ms\n\n", timingfun.elapsed);
+	
+	printf("Timing ODE Jac = %f ms\n\n", timingjac.elapsed);
+
+	printf("Timing LU Decomp = %f ms\n\n", timingludecomp.elapsed);
 
 	return 0;
 }
